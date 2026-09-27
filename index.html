@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>有名ブランド ロゴ部分公開 当てクイズ</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { background: #111827; color: #f9fafb; font-family: 'Segoe UI', sans-serif; }
+  @keyframes revealBlock { from{opacity:0;transform:scale(1.1)} to{opacity:1;transform:scale(1)} }
+  .reveal-anim { animation: revealBlock 0.4s ease; }
+  @keyframes correct { 0%,100%{background:#16a34a} 50%{background:#22c55e} }
+  .correct-flash { animation: correct 0.5s ease; }
+  @keyframes wrong { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+  .wrong-shake { animation: wrong 0.3s ease; }
+</style>
+</head>
+<body class="min-h-screen p-4">
+<div class="max-w-3xl mx-auto">
+  <h1 class="text-2xl font-bold text-yellow-400 mb-1">🎯 ブランド ロゴ部分公開 当てクイズ</h1>
+  <p class="text-gray-400 text-sm mb-5">カラーブロックのヒントを段階的に公開してブランドを当てよう！ヒントが少ないほど高得点。</p>
+
+  <!-- カテゴリ絞り込み -->
+  <div class="flex flex-wrap gap-2 mb-4">
+    <label class="text-sm text-gray-400 self-center">カテゴリ:</label>
+    <div id="cat-filter" class="flex flex-wrap gap-2"></div>
+  </div>
+
+  <!-- メインゲーム -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+    <!-- Canvas エリア -->
+    <div>
+      <canvas id="logo-canvas" width="320" height="240"
+        class="w-full rounded-xl border-2 border-gray-700 bg-gray-900"
+        aria-label="ブランドカラーヒントキャンバス"></canvas>
+      <div class="mt-2 text-xs text-gray-500 text-center">ブランドカラーのモザイクヒント</div>
+    </div>
+
+    <!-- クイズエリア -->
+    <div class="bg-gray-800 rounded-xl p-4">
+      <div class="flex items-center justify-between mb-3">
+        <div class="text-sm text-gray-400">問題 <span id="q-num">1</span> / <span id="q-total">10</span></div>
+        <div class="text-sm text-gray-400">スコア: <span id="current-score" class="text-yellow-400 font-bold">0</span></div>
+      </div>
+
+      <!-- ヒント表示 -->
+      <div id="hints-area" class="space-y-2 mb-4 min-h-24">
+        <div class="text-xs text-gray-500">「次のヒント」ボタンでヒントを公開</div>
+      </div>
+
+      <!-- ヒントボタン -->
+      <button id="hint-btn" onclick="revealHint()"
+        class="w-full bg-blue-700 hover:bg-blue-600 text-white py-2 rounded-lg text-sm mb-3 transition-colors"
+        aria-label="次のヒントを表示">
+        💡 次のヒントを表示 (<span id="hint-count">0</span>/3)
+      </button>
+
+      <!-- 4択ボタン -->
+      <div id="choices" class="grid grid-cols-2 gap-2 mb-3"></div>
+
+      <!-- テキスト入力（補助） -->
+      <div class="flex gap-2">
+        <label for="text-answer" class="sr-only">ブランド名を入力</label>
+        <input type="text" id="text-answer" placeholder="ブランド名を入力..."
+          class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-yellow-400"
+          aria-label="ブランド名テキスト入力">
+        <button onclick="submitTextAnswer()"
+          class="bg-yellow-600 hover:bg-yellow-500 text-white px-4 rounded-lg text-sm font-semibold"
+          aria-label="テキストで回答する">回答</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 結果 & 統計 -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
+    <div class="bg-gray-800 rounded-xl p-4">
+      <h2 class="text-sm font-semibold text-gray-300 mb-3">📊 セッション結果</h2>
+      <div class="space-y-1 text-sm">
+        <div class="flex justify-between"><span class="text-gray-400">合計スコア</span><span id="total-score" class="font-bold text-yellow-400">0</span></div>
+        <div class="flex justify-between"><span class="text-gray-400">正解数</span><span id="correct-count" class="font-bold text-green-400">0</span></div>
+        <div class="flex justify-between"><span class="text-gray-400">正解率</span><span id="correct-rate" class="font-bold text-blue-400">--%</span></div>
+        <div class="flex justify-between"><span class="text-gray-400">累計最高</span><span id="best-score" class="font-bold text-purple-400">0</span></div>
+      </div>
+    </div>
+    <div class="bg-gray-800 rounded-xl p-4">
+      <h2 class="text-sm font-semibold text-gray-300 mb-3">📋 回答ログ</h2>
+      <div id="answer-log" class="space-y-1 text-xs max-h-32 overflow-y-auto"></div>
+    </div>
+  </div>
+
+  <div class="text-center mt-4">
+    <button onclick="startGame()" class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold px-8 py-3 rounded-xl" aria-label="ゲームをスタートする">▶ スタート / リセット</button>
+  </div>
+</div>
+
+<script>
+const BRANDS = [
+  // IT
+  {name:'Apple',cat:'IT',color:['#555555','#888888','#aaaaaa'],shapes:['🍎'],h1:'モノトーン系のシンプルデザイン',h2:'シルバー・グレー・黒の3色',h3:'コンピュータ・スマートフォンメーカー'},
+  {name:'Google',cat:'IT',color:['#4285F4','#DB4437','#F4B400','#0F9D58'],shapes:['G'],h1:'赤・青・黄・緑の4色',h2:'検索エンジン最大手',h3:'Androidを開発した米IT企業'},
+  {name:'Microsoft',cat:'IT',color:['#F25022','#7FBA00','#00A4EF','#FFB900'],shapes:['■','■','■','■'],h1:'4色の正方形が並ぶデザイン',h2:'赤・緑・青・黄の正方形4つ',h3:'WindowsとOfficeで知られる企業'},
+  {name:'Amazon',cat:'IT',color:['#FF9900','#232F3E'],shapes:['a'],h1:'オレンジと黒のカラーリング',h2:'スマイルマークの矢印が特徴',h3:'ECサイトとクラウドサービスの世界最大手'},
+  {name:'Meta',cat:'IT',color:['#1877F2','#42B72A'],shapes:['f'],h1:'濃いブルーのシンプルデザイン',h2:'旧Facebook。青を基調とするSNS',h3:'Instagram・WhatsAppを傘下に持つ'},
+  {name:'Netflix',cat:'IT',color:['#E50914','#141414'],shapes:['N'],h1:'赤と黒のコントラスト',h2:'大文字Nが象徴的なロゴ',h3:'世界最大の動画ストリーミングサービス'},
+  {name:'Spotify',cat:'IT',color:['#1DB954','#191414'],shapes:['○'],h1:'明るい緑と黒',h2:'音波を表す3本線のアイコン',h3:'世界最大の音楽ストリーミングサービス'},
+  {name:'Twitter/X',cat:'IT',color:['#000000','#FFFFFF'],shapes:['X'],h1:'黒と白のみのモノクロ',h2:'Xの文字が特徴的',h3:'旧Twitter。短文投稿SNS'},
+  // 食品
+  {name:'McDonald\'s',cat:'食品',color:['#FFC72C','#DA291C'],shapes:['M'],h1:'黄色と赤の組み合わせ',h2:'ゴールデンアーチ（M）が有名',h3:'世界最大のファストフードチェーン'},
+  {name:'Coca-Cola',cat:'食品',color:['#F40009','#FFFFFF'],shapes:['C'],h1:'赤と白の定番カラー',h2:'流れるような筆記体ロゴ',h3:'1886年創業の炭酸飲料ブランド'},
+  {name:'Starbucks',cat:'食品',color:['#006241','#CBA258'],shapes:['★'],h1:'深緑のシンプルカラー',h2:'人魚（セイレーン）のマーク',h3:'世界最大のコーヒーチェーン'},
+  {name:'KFC',cat:'食品',color:['#F40027','#FFFFFF'],shapes:['👨'],h1:'赤・白・黒のカラー',h2:'眼鏡をかけた老人のロゴ',h3:'Kentucky Fried Chickenの略称'},
+  {name:'IKEA',cat:'食品',color:['#0058A3','#FFDA1A'],shapes:['IKEA'],h1:'青と黄のスウェーデンカラー',h2:'黄色地に青文字またはその逆',h3:'世界最大の家具・インテリア小売チェーン'},
+  // 車
+  {name:'Toyota',cat:'車',color:['#EB0A1E','#BEBEBE'],shapes:['⊙'],h1:'赤・シルバー・白のカラー',h2:'3つの楕円が重なるエンブレム',h3:'日本最大・世界有数の自動車メーカー'},
+  {name:'BMW',cat:'車',color:['#0066B1','#FFFFFF','#000000'],shapes:['○'],h1:'青・白・黒の3色',h2:'プロペラを模した4分割円形エンブレム',h3:'ドイツの高級車・バイクメーカー'},
+  {name:'Ferrari',cat:'車',color:['#CC0000','#FFCC00'],shapes:['馬'],h1:'赤と黄のカラー',h2:'黒の跳ね馬が描かれたシールド',h3:'イタリアの高級スポーツカーメーカー'},
+  {name:'Tesla',cat:'車',color:['#CC0000','#FFFFFF'],shapes:['T'],h1:'赤・白のシンプルカラー',h2:'Tの文字をモチーフにした独特の形状',h3:'イーロン・マスク率いるEVメーカー'},
+  // ファッション
+  {name:'Nike',cat:'ファッション',color:['#000000','#FFFFFF'],shapes:['✓'],h1:'黒・白のシンプル',h2:'スウッシュと呼ばれるチェックマーク',h3:'Just Do Itのスローガンで有名なスポーツブランド'},
+  {name:'Adidas',cat:'ファッション',color:['#000000','#FFFFFF'],shapes:['|||'],h1:'黒・白のツートン',h2:'3本のストライプが特徴',h3:'ドイツ発祥の世界的スポーツブランド'},
+  {name:'Louis Vuitton',cat:'ファッション',color:['#8B6914','#FFFFFF'],shapes:['LV'],h1:'ブラウン・ゴールド・ベージュ',h2:'LVのモノグラムが世界的に有名',h3:'フランス発の世界最大規模の高級ファッションブランド'},
+  {name:'Chanel',cat:'ファッション',color:['#000000','#FFFFFF'],shapes:['CC'],h1:'黒と白のみ',h2:'二重のCが組み合わさったシンボル',h3:'ガブリエル・シャネルが設立したフランスの高級ブランド'},
+  // スポーツ
+  {name:'NBA',cat:'スポーツ',color:['#17408B','#C9082A','#FFFFFF'],shapes:['選手'],h1:'青・赤・白のアメリカンカラー',h2:'バスケットボール選手のシルエット',h3:'北米プロバスケットボールリーグ'},
+  {name:'FIFA',cat:'スポーツ',color:['#326195','#FFFFFF'],shapes:['○'],h1:'青と白のスポーツカラー',h2:'サッカーボールとシンプルなロゴ',h3:'国際サッカー連盟。ワールドカップ主催'},
+  {name:'Red Bull',cat:'スポーツ',color:['#CC1E4A','#FFC906'],shapes:['🐂'],h1:'赤と黄のビビッドカラー',h2:'2頭の牛が向き合うデザイン',h3:'エナジードリンクブランド・F1チームオーナー'},
+  // その他追加
+  {name:'LEGO',cat:'食品',color:['#E3000B','#FFD700','#FFFFFF'],shapes:['LEGO'],h1:'赤・黄・白のカラー',h2:'黄色の長方形に赤文字',h3:'デンマーク発祥の世界的玩具ブランド'},
+  {name:'YouTube',cat:'IT',color:['#FF0000','#FFFFFF'],shapes:['▶'],h1:'赤と白のカラー',h2:'白い三角の再生ボタン',h3:'Googleが運営する世界最大の動画共有サービス'},
+  {name:'PlayStation',cat:'IT',color:['#003087','#003791'],shapes:['○△□×'],h1:'青を基調としたカラー',h2:'○△□×の4つのシンボル',h3:'Sony Interactive Entertainmentのゲーム機ブランド'},
+  {name:'HONDA',cat:'車',color:['#CC0001','#FFFFFF'],shapes:['H'],h1:'赤と白がメイン',h2:'スタイリッシュなH型のウイングマーク',h3:'バイクと自動車両方を製造する日本の大手メーカー'},
+  {name:'UNIQLO',cat:'ファッション',color:['#FF0000','#FFFFFF'],shapes:['UNIQLO'],h1:'赤と白のシンプルデザイン',h2:'日本語の「ユニクロ」漢字ロゴも有名',h3:'ファーストリテイリング傘下の日本最大カジュアルウェアブランド'},
+  {name:'Puma',cat:'スポーツ',color:['#000000','#FFFFFF'],shapes:['🐆'],h1:'黒と白のシンプルなロゴ',h2:'跳躍するピューマ（ネコ科動物）',h3:'ドイツ発祥のスポーツ用品ブランド。アディダスの兄弟ブランド'},
+];
+
+const CATS = ['すべて','IT','食品','車','ファッション','スポーツ'];
+let activeCat = 'すべて';
+let quiz = [];
+let qIdx = 0;
+let hintsRevealed = 0;
+let sessionScore = 0;
+let sessionCorrect = 0;
+let sessionAnswered = 0;
+let answerLog = [];
+let bestScore = parseInt(localStorage.getItem('quiz-best') || '0');
+
+function initCatFilter() {
+  const container = document.getElementById('cat-filter');
+  CATS.forEach(cat => {
+    const btn = document.createElement('button');
+    btn.textContent = cat;
+    btn.className = 'px-3 py-1 rounded-full text-sm transition-colors ' +
+      (cat === activeCat ? 'bg-yellow-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600');
+    btn.setAttribute('aria-label', cat + 'カテゴリを選択');
+    btn.onclick = () => {
+      activeCat = cat;
+      document.querySelectorAll('#cat-filter button').forEach(b => {
+        b.className = 'px-3 py-1 rounded-full text-sm transition-colors bg-gray-700 text-gray-300 hover:bg-gray-600';
+      });
+      btn.className = 'px-3 py-1 rounded-full text-sm transition-colors bg-yellow-600 text-white';
+    };
+    container.appendChild(btn);
+  });
+}
+
+function getFilteredBrands() {
+  return activeCat === 'すべて' ? BRANDS : BRANDS.filter(b => b.cat === activeCat);
+}
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function startGame() {
+  const pool = getFilteredBrands();
+  quiz = shuffle(pool).slice(0, Math.min(10, pool.length));
+  qIdx = 0;
+  sessionScore = 0;
+  sessionCorrect = 0;
+  sessionAnswered = 0;
+  answerLog = [];
+  document.getElementById('q-total').textContent = quiz.length;
+  updateScoreDisplay();
+  renderAnswerLog();
+  loadQuestion();
+}
+
+function loadQuestion() {
+  if (qIdx >= quiz.length) {
+    showFinalResult();
+    return;
+  }
+  hintsRevealed = 0;
+  const brand = quiz[qIdx];
+  document.getElementById('q-num').textContent = qIdx + 1;
+  document.getElementById('hint-count').textContent = '0';
+  document.getElementById('hints-area').innerHTML = '<div class="text-xs text-gray-500">ヒントを公開してください</div>';
+  document.getElementById('text-answer').value = '';
+
+  drawCanvas(brand, 0);
+  buildChoices(brand);
+
+  const hBtn = document.getElementById('hint-btn');
+  hBtn.disabled = false;
+  hBtn.className = 'w-full bg-blue-700 hover:bg-blue-600 text-white py-2 rounded-lg text-sm mb-3 transition-colors';
+}
+
+function drawCanvas(brand, hintLevel) {
+  const canvas = document.getElementById('logo-canvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#111827';
+  ctx.fillRect(0, 0, W, H);
+
+  const colors = brand.color;
+  const blockSize = hintLevel === 0 ? 30 : hintLevel === 1 ? 20 : 12;
+  const reveal = hintLevel === 0 ? 0.15 : hintLevel === 1 ? 0.35 : hintLevel === 2 ? 0.60 : 1.0;
+
+  // Mosaic blocks
+  for (let y = 0; y < H; y += blockSize) {
+    for (let x = 0; x < W; x += blockSize) {
+      // Determine if this block is revealed
+      const rand = Math.sin(x * 100 + y * 1000) * 0.5 + 0.5;
+      const baseColor = colors[Math.floor(rand * colors.length)];
+      const alpha = rand < reveal ? 1.0 : 0.1 + rand * 0.1;
+
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = baseColor;
+      ctx.fillRect(x, y, blockSize - 1, blockSize - 1);
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // Border grid for mosaic effect
+  ctx.strokeStyle = 'rgba(17,24,39,0.5)';
+  ctx.lineWidth = 1;
+  for (let y = 0; y < H; y += blockSize) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+  for (let x = 0; x < W; x += blockSize) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+
+  // Hint level indicator
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, H - 24, W, 24);
+  ctx.fillStyle = '#9ca3af';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('ヒント公開率: ' + Math.round(reveal * 100) + '%  |  正方形サイズ: ' + blockSize + 'px', W / 2, H - 8);
+}
+
+function revealHint() {
+  if (hintsRevealed >= 3) return;
+  hintsRevealed++;
+  const brand = quiz[qIdx];
+  document.getElementById('hint-count').textContent = hintsRevealed;
+
+  const hintsArea = document.getElementById('hints-area');
+  if (hintsArea.querySelector('.text-xs.text-gray-500')) hintsArea.innerHTML = '';
+
+  const hintTexts = [brand.h1, brand.h2, brand.h3];
+  const hintEl = document.createElement('div');
+  hintEl.className = 'reveal-anim bg-blue-900 bg-opacity-60 border border-blue-700 rounded-lg p-2 text-sm text-blue-100';
+  const numEl = document.createElement('span');
+  numEl.className = 'font-bold text-blue-300 mr-2';
+  numEl.textContent = 'ヒント' + hintsRevealed + ':';
+  const txtEl = document.createElement('span');
+  txtEl.textContent = hintTexts[hintsRevealed - 1];
+  hintEl.appendChild(numEl);
+  hintEl.appendChild(txtEl);
+  hintsArea.appendChild(hintEl);
+
+  drawCanvas(brand, hintsRevealed);
+
+  if (hintsRevealed >= 3) {
+    const hBtn = document.getElementById('hint-btn');
+    hBtn.className = 'w-full bg-gray-600 text-gray-400 py-2 rounded-lg text-sm mb-3 cursor-not-allowed';
+    hBtn.disabled = true;
+  }
+}
+
+function buildChoices(brand) {
+  const pool = getFilteredBrands();
+  const wrongs = shuffle(pool.filter(b => b.name !== brand.name)).slice(0, 3);
+  const choices = shuffle([brand, ...wrongs]);
+
+  const container = document.getElementById('choices');
+  container.innerHTML = '';
+  choices.forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'bg-gray-700 hover:bg-gray-600 text-white py-2 px-3 rounded-lg text-sm transition-colors text-left';
+    btn.setAttribute('aria-label', b.name + 'と回答する');
+    btn.textContent = b.name;
+    btn.onclick = () => submitAnswer(b.name === brand.name, b.name);
+    container.appendChild(btn);
+  });
+}
+
+function submitTextAnswer() {
+  const brand = quiz[qIdx];
+  const input = document.getElementById('text-answer').value.trim();
+  if (!input) return;
+  const correct = brand.name.toLowerCase() === input.toLowerCase() ||
+    brand.name.toLowerCase().includes(input.toLowerCase());
+  submitAnswer(correct, input);
+}
+
+function submitAnswer(isCorrect, given) {
+  const brand = quiz[qIdx];
+  const pts = isCorrect ? Math.max(1, 3 - hintsRevealed) * 10 : 0;
+
+  if (isCorrect) {
+    sessionScore += pts;
+    sessionCorrect++;
+  }
+  sessionAnswered++;
+
+  answerLog.push({ brand: brand.name, given, correct: isCorrect, pts, hints: hintsRevealed });
+  updateScoreDisplay();
+  renderAnswerLog();
+
+  // Flash feedback
+  const canvas = document.getElementById('logo-canvas');
+  if (isCorrect) {
+    canvas.style.borderColor = '#22c55e';
+    drawCanvas(brand, 4);
+    // Show brand name on canvas
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 90, canvas.width, 60);
+    ctx.fillStyle = '#22c55e';
+    ctx.font = 'bold 28px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('✓ ' + brand.name, canvas.width / 2, 130);
+  } else {
+    canvas.style.borderColor = '#ef4444';
+    const ctx = canvas.getContext('2d');
+    drawCanvas(brand, 4);
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 90, canvas.width, 60);
+    ctx.fillStyle = '#ef4444';
+    ctx.font = 'bold 28px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('× ' + brand.name, canvas.width / 2, 130);
+  }
+
+  // Disable choices
+  const choices = document.getElementById('choices');
+  Array.from(choices.children).forEach(btn => { btn.disabled = true; btn.className += ' opacity-50 cursor-not-allowed'; });
+  document.getElementById('hint-btn').disabled = true;
+
+  setTimeout(() => {
+    canvas.style.borderColor = '#374151';
+    qIdx++;
+    loadQuestion();
+  }, 1500);
+}
+
+function updateScoreDisplay() {
+  document.getElementById('current-score').textContent = sessionScore;
+  document.getElementById('total-score').textContent = sessionScore;
+  document.getElementById('correct-count').textContent = sessionCorrect + '/' + sessionAnswered;
+  document.getElementById('correct-rate').textContent = sessionAnswered > 0
+    ? Math.round(sessionCorrect / sessionAnswered * 100) + '%' : '--%';
+  if (sessionScore > bestScore) {
+    bestScore = sessionScore;
+    localStorage.setItem('quiz-best', String(bestScore));
+  }
+  document.getElementById('best-score').textContent = bestScore;
+}
+
+function renderAnswerLog() {
+  const list = document.getElementById('answer-log');
+  list.innerHTML = '';
+  [...answerLog].reverse().forEach(entry => {
+    const row = document.createElement('div');
+    row.className = 'flex items-center gap-2';
+    const icon = document.createElement('span');
+    icon.textContent = entry.correct ? '✓' : '×';
+    icon.className = entry.correct ? 'text-green-400' : 'text-red-400';
+    const brand = document.createElement('span');
+    brand.className = 'text-white font-semibold';
+    brand.textContent = entry.brand;
+    const pts = document.createElement('span');
+    pts.className = entry.correct ? 'text-yellow-400 ml-auto' : 'text-gray-500 ml-auto';
+    pts.textContent = entry.correct ? '+' + entry.pts : '0';
+    row.appendChild(icon); row.appendChild(brand); row.appendChild(pts);
+    list.appendChild(row);
+  });
+}
+
+function showFinalResult() {
+  const canvas = document.getElementById('logo-canvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#111827';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fbbf24';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('ゲーム終了！', W/2, 80);
+  ctx.fillStyle = '#f1f5f9';
+  ctx.font = 'bold 36px sans-serif';
+  ctx.fillText(sessionScore + '点', W/2, 140);
+  ctx.fillStyle = '#9ca3af';
+  ctx.font = '16px sans-serif';
+  ctx.fillText(sessionCorrect + '/' + quiz.length + '問正解', W/2, 180);
+
+  document.getElementById('hints-area').innerHTML = '<div class="text-center text-gray-400 text-sm py-4">「スタート/リセット」でもう一度遊べます！</div>';
+  document.getElementById('choices').innerHTML = '';
+  document.getElementById('hint-btn').disabled = true;
+}
+
+initCatFilter();
+updateScoreDisplay();
+// Draw placeholder canvas
+const canvas = document.getElementById('logo-canvas');
+const ctx = canvas.getContext('2d');
+ctx.fillStyle = '#111827';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.fillStyle = '#374151';
+ctx.font = '16px sans-serif';
+ctx.textAlign = 'center';
+ctx.fillText('スタートボタンを押してください', canvas.width/2, canvas.height/2);
+</script>
+</body>
+</html>
